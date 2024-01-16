@@ -1,0 +1,155 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+import matplotlib.pyplot as plt
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.applications import vgg16
+from tensorflow.keras.preprocessing.image import ImageDataGenerator, load_img
+from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras import Sequential, optimizers
+import os
+import random
+%matplotlib inline
+
+# settings for reproducibility
+seed = 42
+random.seed(seed)
+tf.random.set_seed(seed)
+np.random.seed(seed)
+os.environ['TF_DETERMINISTIC_OPS'] = '1'
+
+vgg_conv = vgg16.VGG16(weights='D:/learn/python/keshe/vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5',
+                       include_top=False,
+                       input_shape=(224, 224, 3))
+
+# VGG16 layer by layer
+vgg_conv.summary()
+
+# each folder contains three subfolders in accordance with the number of classes
+train_dir = 'D:/learn/python/keshe/clean-dataset/clean-dataset/train'
+validation_dir = 'D:/learn/python/keshe/clean-dataset/clean-dataset/validation'
+# the number of images for train and test is divided into 80:20 ratio
+nTrain = 600
+nVal = 150
+
+# load the normalized images
+datagen = ImageDataGenerator(rescale=1./255)
+# define the batch size
+batch_size = 20
+# the defined shape is equal to the network output tensor shape
+train_features = np.zeros(shape=(nTrain, 7, 7, 512))
+train_labels = np.zeros(shape=(nTrain,3))
+# generate batches of train images and labels
+train_generator = datagen.flow_from_directory(
+ train_dir,
+ target_size=(224, 224),
+ batch_size=batch_size,
+ class_mode='categorical',
+ shuffle=True)
+
+# choose the image index for the visualization
+image_id = 0
+# get the train image shape 
+print("The shape of train images: {}".format(train_generator[image_id][0][0].shape))
+# visualize the image example
+plt.axis('off')
+plt.imshow(train_generator[image_id][0][0])
+# get image class and map its index with the names of the classes
+train_image_label_id = np.argmax(train_generator[image_id][1][0])
+classes_list = list(train_generator.class_indices.keys())
+# show image class
+plt.title("Class name: {}".format(classes_list[train_image_label_id]))
+
+# iterate through the batches of train images and labels
+for i, (inputs_batch, labels_batch) in enumerate(train_generator):
+    if i * batch_size >= nTrain:
+        break 
+     # pass the images through the network
+    features_batch = vgg_conv.predict(inputs_batch)
+    train_features[i * batch_size : (i + 1) * batch_size] = features_batch
+    train_labels[i * batch_size : (i + 1) * batch_size] = labels_batch
+# reshape train_features into vector 
+train_features_vec = np.reshape(train_features, (nTrain, 7 * 7 * 512))
+print("Train features: {}".format(train_features_vec.shape))
+
+validation_features = np.zeros(shape=(nVal, 7, 7, 512))
+validation_labels = np.zeros(shape=(nVal,3))
+# generate batches of validation images and labels
+validation_generator = datagen.flow_from_directory(
+ validation_dir,
+ target_size=(224, 224),
+ batch_size=batch_size,
+ class_mode='categorical',
+ shuffle=False)
+print(validation_generator)
+
+# choose the image index for the visualization
+val_image_id = 1
+# get the validation image shape 
+print("The shape of validation images: {}".format(validation_generator[val_image_id]))
+format(train_generator[image_id][0][0].shape)
+# visualize the image example
+plt.axis('off')
+plt.imshow(validation_generator[val_image_id][0][0])
+# get image class and map its index with the names of the classes
+val_image_label_id = np.argmax(validation_generator[val_image_id][1][0])
+classes_list = list(validation_generator.class_indices.keys())
+# show image class
+plt.title("Class name: {}".format(classes_list[val_image_label_id]))
+
+# iterate through the batches of validation images and labels
+for i, (inputs_batch, labels_batch) in enumerate(validation_generator):
+    if i * batch_size >= nVal:
+        break
+    features_batch = vgg_conv.predict(inputs_batch)
+    validation_features[i * batch_size : (i + 1) * batch_size] = features_batch
+    validation_labels[i * batch_size : (i + 1) * batch_size] = labels_batch
+# reshape validation_features into vector 
+validation_features_vec = np.reshape(validation_features, (nVal, 7 * 7 * 512))
+print("Validation features: {}".format(validation_features_vec.shape))
+
+model = Sequential()
+model.add(Dense(512, activation='relu', input_dim=7 * 7 * 512))
+model.add(Dropout(0.5))
+model.add(Dense(3, activation='softmax'))
+# configure the model for training
+model.compile(optimizer=optimizers.RMSprop(learning_rate=2e-4),
+ loss='categorical_crossentropy',
+ metrics=['acc'])
+# use the train and validation feature vectors 
+history = model.fit(train_features_vec,
+ train_labels,
+ epochs=20,
+ batch_size=batch_size,
+ validation_data=(validation_features_vec,validation_labels))
+
+# get the list of all validation file names
+fnames = validation_generator.filenames
+# get the list of the corresponding classes
+ground_truth = validation_generator.classes
+# get the dictionary of classes
+label2index = validation_generator.class_indices
+# obtain the list of classes
+idx2label = list(label2index.keys())
+print("The list of classes: ", idx2label)
+
+prob = model.predict(validation_features_vec)
+predictions = np.argmax(prob, axis=1)
+print(predictions)
+errors = np.where(predictions != ground_truth)[0]
+print("Number of errors = {}/{}".format(len(errors),nVal))
+
+
+for i in range(len(errors)):
+    pred_class = np.argmax(prob[errors[i]])
+    pred_label = idx2label[pred_class]
+ 
+    print('Original label:{}, Prediction :{}, confidence : {:.3f}'.format(
+        fnames[errors[i]].split('/')[0],
+        pred_label,
+        prob[errors[i]][pred_class]))
+ 
+    original = load_img('{}/{}'.format(validation_dir,fnames[errors[i]]))
+    plt.axis('off')
+    plt.imshow(original)
+    plt.show()
